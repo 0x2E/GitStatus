@@ -11,3 +11,4 @@ Show GitHub notifications on menubar (macOS 13.0+).
 - vector icon in app logo: [bytedance/IconPark](https://github.com/bytedance/IconPark)
 - vector icon in menubar: [tabler-icons](https://tabler-icons.io/i/message-2-code)
 - figma plugin: [Xcode App Icon Exporter](https://www.figma.com/community/plugin/1100675815076145179/xcode-app-icon-exporter)
+- build dmg: [sindresorhus/create-dmg](https://github.com/sindresorhus/create-dmg)
