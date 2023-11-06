@@ -13,7 +13,7 @@ struct ContentView: View {
     
     var body: some View {
         if runtimeData.lastPull != nil {
-            Text("Updated at: \(formatDate(runtimeData.lastPull))")
+            Text("Updated \(formatDate(runtimeData.lastPull))")
         }
         
         if runtimeData.message != "" {
@@ -35,10 +35,15 @@ struct ContentView: View {
         
         Divider()
         
-        Link(destination: URL(string: "https://github.com/notifications")!) {
-            Text("Raw Notifications")
+        Button("Force Retry") {
+            runtimeData.renewPullTask(interval: runtimeData.interval)
         }
-        
+        Link(destination: URL(string: "https://github.com/notifications")!) {
+            Text("View in Broswer")
+        }
+
+        Divider()
+
         // https://stackoverflow.com/questions/65355696/how-to-programatically-open-settings-preferences-window-in-a-macos-swiftui-app
         if #available(macOS 14.0, *) {
             SettingsLink(label: {
@@ -49,7 +54,7 @@ struct ContentView: View {
                 NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
             }
         }
-        Button("Source Code"){
+        Button("Source Code") {
             openURL(URL(string: "https://github.com/0x2E/GitStatus")!)
         }
         
@@ -63,7 +68,7 @@ struct ContentView: View {
     
     func formatDate(_ d: Date?) -> String {
         let dateFormatter = DateFormatter()
-        dateFormatter.dateFormat = "MM-dd HH:mm:ss"
+        dateFormatter.dateFormat = "YYYY-MM-dd HH:mm:ss"
         
         if let timestamp = d {
             return dateFormatter.string(from: timestamp)
