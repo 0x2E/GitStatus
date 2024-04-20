@@ -34,6 +34,10 @@ struct GitStatusApp: App {
             if runtimeData.notifications.count > 0 {
                 Text(runtimeData.notifications.count, format: .number)
             }
+            
+            if !runtimeData.message.isEmpty {
+                Text("!")
+            }
         }
     }
 }

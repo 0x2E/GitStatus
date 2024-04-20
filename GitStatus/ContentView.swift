@@ -13,13 +13,12 @@ struct ContentView: View {
     
     var body: some View {
         if runtimeData.lastPull != nil {
-            Text("Updated \(formatDate(runtimeData.lastPull))")
+            Text("Updated at \(formatDate(runtimeData.lastPull))")
         }
         
-        if runtimeData.message != "" {
+        if !runtimeData.message.isEmpty {
             Text(runtimeData.message)
-        }
-        else if runtimeData.notifications.count == 0 {
+        } else if runtimeData.notifications.count == 0 {
             Text("All caught up!")
         } else {
             ForEach(runtimeData.notifications.prefix(runtimeData.listLength)){ notification in
