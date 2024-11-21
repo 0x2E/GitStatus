@@ -38,7 +38,7 @@ struct ContentView: View {
             runtimeData.renewPullTask(interval: runtimeData.interval)
         }
         Link(destination: URL(string: "https://github.com/notifications")!) {
-            Text("View in Broswer")
+            Text("View in Browser")
         }
 
         Divider()
