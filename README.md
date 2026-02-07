@@ -1,6 +1,6 @@
 # GitStatus
 
-Show GitHub notifications on menubar (macOS 14.0+).
+Show GitHub notifications on menubar.
 
 <p align="center">
   <img src="./assets/screenshot.png" alt="preview">
@@ -14,7 +14,7 @@ Show GitHub notifications on menubar (macOS 14.0+).
 
 ## Usage
 
-1. Download the latest build from [Releases](../../releases).
+1. Download the latest build from [Releases](https://github.com/0x2E/GitStatus/releases).
 2. Open Settings and fill in the required configuration (e.g. GitHub token).
 
 ## Credits
