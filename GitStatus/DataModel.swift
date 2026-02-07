@@ -7,32 +7,315 @@
 
 import Foundation
 
-// https://docs.github.com/en/rest/activity/notifications?apiVersion=2022-11-28#list-notifications-for-the-authenticated-user
-struct Notification: Identifiable, Codable, Observable {
+// GitHub REST API: GET /notifications
+// https://docs.github.com/en/rest/activity/notifications#list-notifications-for-the-authenticated-user
+
+struct GitHubUser: Identifiable, Codable, Hashable {
+    let id: Int64
+    let login: String
+    let avatarUrl: URL
+}
+
+struct GitHubRepository: Codable {
+    let fullName: String
+    let owner: GitHubUser?
+}
+
+struct GitHubNotificationThread: Identifiable, Codable {
     let id: String
-    
-    let repository: Repository
-    struct Repository: Codable {
-        let fullName: String
-    }
-    
+
+    let repository: GitHubRepository
+
     let subject: Subject
     struct Subject: Codable {
         let title: String
         let type: String
+        let url: URL?
+        let latestCommentUrl: URL?
     }
-    
+
     let reason: String
     let unread: Bool
+    let updatedAt: Date
+    let lastReadAt: Date?
+    let url: URL
+    let subscriptionUrl: URL?
+}
+
+extension GitHubNotificationThread.Subject {
+    func preferredWebURL() -> URL? {
+        guard let apiURL = url else { return nil }
+
+        // Best-effort conversion for a few common API URLs.
+        if apiURL.host == "api.github.com" {
+            let parts = apiURL.pathComponents
+            if parts.count >= 3, parts[1] == "repos" {
+                let rest = parts.dropFirst(2).joined(separator: "/")
+                var webPath = "/" + rest
+                webPath = webPath.replacingOccurrences(of: "/pulls/", with: "/pull/")
+                webPath = webPath.replacingOccurrences(of: "/commits/", with: "/commit/")
+                return URL(string: "https://github.com" + webPath)
+            }
+        }
+
+        return apiURL
+    }
+}
+
+struct GitHubSubjectDetails: Equatable {
+    let htmlUrl: URL?
+    let participants: [GitHubUser]
+}
+
+enum GitHubNotificationReferrerId {
+    private static let queryName = "notification_referrer_id"
+
+    static func value(threadId: String, userId: Int64) -> String {
+        // Matches GitHub's tracking format used when opening a notification thread from the inbox.
+        // Example raw string: "018:NotificationThread138661096:123456789"
+        let raw = "018:NotificationThread\(threadId):\(userId)"
+        return Data(raw.utf8).base64EncodedString()
+    }
+
+    static func appending(to url: URL, threadId: String, userId: Int64) -> URL {
+        guard var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
+            return url
+        }
+
+        var items = components.queryItems ?? []
+        guard !items.contains(where: { $0.name == queryName }) else {
+            return url
+        }
+
+        items.append(URLQueryItem(name: queryName, value: value(threadId: threadId, userId: userId)))
+        components.queryItems = items
+        return components.url ?? url
+    }
+}
+
+func fetchNotificationThreads(
+    githubToken: String,
+    page: Int = 1,
+    perPage: Int = 50
+) async -> ([GitHubNotificationThread], Bool, Bool, String) {
+    AppLog.debug("Fetching notification threads")
+    do {
+        let api = GitHubAPIClient(token: githubToken)
+        let (notifications, hasNext) = try await api.fetchNotifications(page: page, perPage: perPage)
+        AppLog.debug("Fetched \(notifications.count) notification threads")
+        return (notifications, true, hasNext, "")
+    } catch let e as GitHubAPIClient.APIError {
+        switch e {
+        case .invalidResponse:
+            AppLog.warning("GitHub API invalid response")
+            return ([], false, false, "invalid response")
+        case .httpError(let statusCode, let body):
+            let preview = body.prefix(512)
+            AppLog.warning("GitHub API HTTP \(statusCode), body: \(preview)")
+            return ([], false, false, "bad request: \(statusCode), \(preview)")
+        }
+    } catch {
+        AppLog.warning("GitHub API request failed (network/firewall?)")
+        return ([], false, false, "cannot request, please check network or firewall")
+    }
+}
+
+enum GitHubDate {
+    private static let withFractional = Date.ISO8601FormatStyle(includingFractionalSeconds: true).parseStrategy
+    private static let withoutFractional = Date.ISO8601FormatStyle(includingFractionalSeconds: false).parseStrategy
+
+    static func parse(_ value: String) -> Date? {
+        if let d = try? withFractional.parse(value) { return d }
+        if let d = try? withoutFractional.parse(value) { return d }
+        return nil
+    }
+}
+
+struct GitHubAPIClient {
+    enum APIError: Error {
+        case invalidResponse
+        case httpError(statusCode: Int, body: String)
+    }
+
+    let token: String
+
+    private static let session: URLSession = {
+        let config = URLSessionConfiguration.ephemeral
+        config.requestCachePolicy = .reloadIgnoringLocalCacheData
+        config.urlCache = nil
+        config.timeoutIntervalForRequest = 10
+        config.timeoutIntervalForResource = 10
+        return URLSession(configuration: config)
+    }()
+
+    func makeRequest(url: URL) -> URLRequest {
+        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 10)
+        request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+        request.setValue("2022-11-28", forHTTPHeaderField: "X-GitHub-Api-Version")
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        return request
+    }
+
+    func fetch<T: Decodable>(_ url: URL) async throws -> T {
+        let started = Date()
+#if DEBUG
+        AppLog.debug("HTTP GET \(url.absoluteString)")
+#endif
+        let (data, response) = try await Self.session.data(for: makeRequest(url: url))
+        guard let http = response as? HTTPURLResponse else {
+            AppLog.warning("HTTP invalid response for \(url.absoluteString)")
+            throw APIError.invalidResponse
+        }
+
+        guard (200...299).contains(http.statusCode) else {
+            let body = String(decoding: data, as: UTF8.self)
+#if DEBUG
+            let ms = Int(Date().timeIntervalSince(started) * 1000)
+            let preview = body.prefix(1024)
+            AppLog.debug("HTTP \(http.statusCode) \(url.absoluteString) (\(ms)ms), body: \(preview)")
+#endif
+            throw APIError.httpError(statusCode: http.statusCode, body: body)
+        }
+
+#if DEBUG
+        let ms = Int(Date().timeIntervalSince(started) * 1000)
+        AppLog.debug("HTTP 2xx \(url.absoluteString) (\(ms)ms)")
+#endif
+
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        decoder.dateDecodingStrategy = .custom { decoder in
+            let container = try decoder.singleValueContainer()
+            let value = try container.decode(String.self)
+            if let date = GitHubDate.parse(value) {
+                return date
+            }
+            throw DecodingError.dataCorruptedError(in: container, debugDescription: "Invalid date: \(value)")
+        }
+        return try decoder.decode(T.self, from: data)
+    }
+
+    func fetchNotifications() async throws -> [GitHubNotificationThread] {
+        try await fetch(URL(string: "https://api.github.com/notifications")!)
+    }
+
+    func fetchViewer() async throws -> GitHubUser {
+        try await fetch(URL(string: "https://api.github.com/user")!)
+    }
+
+    private func linkHeaderHasNextPage(_ linkHeader: String?) -> Bool {
+        guard let linkHeader, !linkHeader.isEmpty else { return false }
+        // Format: <url>; rel="next", <url>; rel="last"
+        return linkHeader.split(separator: ",").contains { part in
+            part.contains("rel=\"next\"")
+        }
+    }
+
+    func fetchNotifications(page: Int, perPage: Int) async throws -> ([GitHubNotificationThread], Bool) {
+        var components = URLComponents(string: "https://api.github.com/notifications")!
+        components.queryItems = [
+            URLQueryItem(name: "page", value: String(max(page, 1))),
+            URLQueryItem(name: "per_page", value: String(min(max(perPage, 1), 50))),
+        ]
+        let url = components.url!
+
+        let started = Date()
+ #if DEBUG
+        AppLog.debug("HTTP GET \(url.absoluteString)")
+ #endif
+        let (data, response) = try await Self.session.data(for: makeRequest(url: url))
+        guard let http = response as? HTTPURLResponse else {
+            AppLog.warning("HTTP invalid response for \(url.absoluteString)")
+            throw APIError.invalidResponse
+        }
+
+        guard (200...299).contains(http.statusCode) else {
+            let body = String(decoding: data, as: UTF8.self)
+ #if DEBUG
+            let ms = Int(Date().timeIntervalSince(started) * 1000)
+            let preview = body.prefix(1024)
+            AppLog.debug("HTTP \(http.statusCode) \(url.absoluteString) (\(ms)ms), body: \(preview)")
+ #endif
+            throw APIError.httpError(statusCode: http.statusCode, body: body)
+        }
+
+ #if DEBUG
+        let ms = Int(Date().timeIntervalSince(started) * 1000)
+        AppLog.debug("HTTP 2xx \(url.absoluteString) (\(ms)ms)")
+ #endif
+
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        decoder.dateDecodingStrategy = .custom { decoder in
+            let container = try decoder.singleValueContainer()
+            let value = try container.decode(String.self)
+            if let date = GitHubDate.parse(value) {
+                return date
+            }
+            throw DecodingError.dataCorruptedError(in: container, debugDescription: "Invalid date: \(value)")
+        }
+        let threads = try decoder.decode([GitHubNotificationThread].self, from: data)
+        let hasNext = linkHeaderHasNextPage(http.value(forHTTPHeaderField: "Link"))
+        return (threads, hasNext)
+    }
+
+    func fetchSubjectDetails(subjectURL: URL) async -> GitHubSubjectDetails? {
+        struct SubjectResource: Codable {
+            let htmlUrl: URL?
+            let user: GitHubUser?
+            let assignees: [GitHubUser]?
+            let requestedReviewers: [GitHubUser]?
+            let author: GitHubUser?
+            let committer: GitHubUser?
+        }
+
+        do {
+            let res: SubjectResource = try await fetch(subjectURL)
+            var seen: Set<Int64> = []
+            var participants: [GitHubUser] = []
+
+            func append(_ user: GitHubUser?) {
+                guard let user else { return }
+                guard !seen.contains(user.id) else { return }
+                seen.insert(user.id)
+                participants.append(user)
+            }
+
+            append(res.user)
+            append(res.author)
+            append(res.committer)
+            for u in res.requestedReviewers ?? [] { append(u) }
+            for u in res.assignees ?? [] { append(u) }
+            return GitHubSubjectDetails(htmlUrl: res.htmlUrl, participants: participants)
+        } catch {
+#if DEBUG
+            AppLog.debug("Subject details fetch failed: \(subjectURL.absoluteString)")
+#endif
+            return nil
+        }
+    }
 }
 
 @MainActor class RuntimeData: ObservableObject {
+    static let shared = RuntimeData()
     @Published var message: String = ""
-    @Published var notifications: [Notification] = []
+    @Published var notifications: [GitHubNotificationThread] = []
+    @Published var subjectDetailsByThreadId: [String: GitHubSubjectDetails] = [:]
 
-    @Published var listLength: Int  = 10 {
+    @Published private(set) var viewerUserId: Int64? = nil
+
+    @Published private(set) var isLoadingMoreNotifications: Bool = false
+    @Published private(set) var hasMoreNotifications: Bool = false
+    @Published private(set) var loadMoreError: String = ""
+
+    @Published var listLength: Int = 10 {
         willSet(newValue) {
             UserDefaults.standard.set(newValue, forKey: "listLength")
+        }
+        didSet(oldValue) {
+            if listLength == oldValue { return }
+            resetPaginationState()
+            renewPullTask(interval: interval)
         }
     }
 
@@ -45,70 +328,131 @@ struct Notification: Identifiable, Codable, Observable {
                 return
             }
             renewPullTask(interval: self.interval)
-            debugPrint("set interval: \(self.interval)")
         }
     }
     
-    private var pullTask: Task = Task {}
+    private var pullTask: Task<Void, Never>?
+    private var detailsTask: Task<Void, Never>?
+    private var loadMoreTask: Task<Void, Never>?
+    private var tokenDebounceTask: Task<Void, Never>?
+    private var viewerFetchTask: Task<Int64?, Never>?
     @Published var lastPull: Date?
+
+    private var nextNotificationsPage: Int? = nil
     
     @Published var githubToken: String {
         willSet(newValue) {
             UserDefaults.standard.set(newValue, forKey: "githubToken")
         }
         didSet {
-            if self.pullTask.isCancelled {
-                renewPullTask(interval: self.interval)
+            viewerFetchTask?.cancel()
+            viewerFetchTask = nil
+            viewerUserId = nil
+
+            tokenDebounceTask?.cancel()
+            let interval = self.interval
+            tokenDebounceTask = Task(priority: .utility) { [weak self] in
+                try? await Task.sleep(for: .milliseconds(600))
+                guard !Task.isCancelled else { return }
+                self?.renewPullTask(interval: interval)
             }
         }
     }
     
     init() {
         let defaults = UserDefaults.standard
-        self.interval = defaults.integer(forKey: "interval")
-        self.listLength = defaults.integer(forKey: "listLength")
+        self.interval = (defaults.object(forKey: "interval") as? Int) ?? 300
+        self.listLength = (defaults.object(forKey: "listLength") as? Int) ?? 10
         self.githubToken = defaults.string(forKey: "githubToken") ?? ""
+
+        if self.interval < 30 { self.interval = 300 }
+        if self.interval > 3600 { self.interval = 3600 }
+        if self.listLength < 1 { self.listLength = 10 }
+        if self.listLength > 50 { self.listLength = 50 }
+
+        resetPaginationState()
+    }
+
+    private var notificationsPerPage: Int {
+        min(max(listLength, 1), 50)
+    }
+
+    private func resetPaginationState() {
+        loadMoreTask?.cancel()
+        loadMoreTask = nil
+        nextNotificationsPage = nil
+        hasMoreNotifications = false
+        isLoadingMoreNotifications = false
+        loadMoreError = ""
     }
     
-    // for swiftui
-    func run() -> RuntimeData {
-        renewPullTask(interval: self.interval)
-        return self
+    func start() {
+        AppLog.info("RuntimeData start")
+        renewPullTask(interval: interval)
     }
     
     func renewPullTask(interval: Int) {
-        self.pullTask.cancel()
+        AppLog.info("Renew pull task (interval=\(interval)s)")
+        pullTask?.cancel()
+        detailsTask?.cancel()
+        loadMoreTask?.cancel()
+        pullTask = nil
+        detailsTask = nil
+        loadMoreTask = nil
         
         if interval < 1 {
             self.message = "Interval is too short"
+            AppLog.warning("Interval too short: \(interval)")
             return
         }
         
-        if self.githubToken == "" {
+        if githubToken.isEmpty {
             self.message = "Set GitHub token in settings first!"
+            AppLog.warning("GitHub token missing")
             return
         }
         
-        self.pullTask = Task {
+        let token = self.githubToken
+        let perPage = notificationsPerPage
+
+        ensureViewerUserId()
+        pullTask = Task.detached(priority: .utility) { [weak self] in
+            guard let self else { return }
             var failsCount = 0
             repeat {
-                let (notifications, ok, err) = await pull(githubToken: self.githubToken)
-                
-                debugPrint(notifications)
+                AppLog.debug("Pull notifications (fails=\(failsCount))")
+                let (firstPage, ok, hasNext, err) = await fetchNotificationThreads(
+                    githubToken: token,
+                    page: 1,
+                    perPage: perPage
+                )
+
+                if !ok {
+                    AppLog.warning("Pull notifications failed: \(err)")
+                }
+
                 await MainActor.run {
-                    self.notifications = notifications
+                    self.notifications = firstPage
                     self.message = err
                     self.lastPull = Date()
+
+                    self.nextNotificationsPage = hasNext ? 2 : nil
+                    self.hasMoreNotifications = self.nextNotificationsPage != nil
+                    self.isLoadingMoreNotifications = false
+                    self.loadMoreError = ""
+
+                    let ids = Set(firstPage.map { $0.id })
+                    self.subjectDetailsByThreadId = self.subjectDetailsByThreadId.filter { ids.contains($0.key) }
                 }
                 
                 if ok {
                     failsCount = 0
                 } else {
-                    print(err)
                     failsCount += 1
                 }
-                
+
                 if Task.isCancelled || failsCount >= 3 {
+                    AppLog.debug("Stopping pull task (cancelled=\(Task.isCancelled), fails=\(failsCount))")
                     return
                 }
                 
@@ -116,47 +460,160 @@ struct Notification: Identifiable, Codable, Observable {
             } while(!Task.isCancelled)
         }
     }
-    
-    func pull(githubToken: String) async -> ([Notification], Bool, String) {
-        debugPrint("pulling")
-        
-        var errMsg = ""
-        
-        var request = URLRequest(url: URL(string: "https://api.github.com/notifications")!, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 5)
-        request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
-        request.setValue("2022-11-28", forHTTPHeaderField: "X-GitHub-Api-Version")
-        request.setValue("Bearer \(githubToken)", forHTTPHeaderField: "Authorization")
-        do {
-            let (data, response) = try await URLSession.shared.data(for: request)
-            if let httpResponse = response as? HTTPURLResponse {
-                if httpResponse.statusCode == 200 {
-                        do {
-                            let decoder = JSONDecoder()
-                            decoder.keyDecodingStrategy = .convertFromSnakeCase
-                            let notifications = try decoder.decode([Notification].self, from: data)
-                            return (notifications, true, "")
-                        } catch {
-                            errMsg = "cannot parsing data"
-                            print("cannot parsing data：\(error)")
+
+    func loadMoreNotifications() {
+        guard !isLoadingMoreNotifications else { return }
+        guard loadMoreTask == nil else { return }
+        guard let page = nextNotificationsPage else { return }
+
+        let token = githubToken
+        let perPage = notificationsPerPage
+
+        isLoadingMoreNotifications = true
+        loadMoreError = ""
+
+        loadMoreTask = Task.detached(priority: .utility) { [token, perPage, page] in
+            let (threads, ok, hasNext, err) = await fetchNotificationThreads(
+                githubToken: token,
+                page: page,
+                perPage: perPage
+            )
+
+            guard !Task.isCancelled else { return }
+
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                defer { self.loadMoreTask = nil }
+
+                // Ignore stale results when pagination state changed.
+                guard self.nextNotificationsPage == page else {
+                    self.isLoadingMoreNotifications = false
+                    return
+                }
+
+                self.isLoadingMoreNotifications = false
+
+                guard ok else {
+                    self.loadMoreError = err
+                    return
+                }
+
+                var seen = Set(self.notifications.map { $0.id })
+                var merged = self.notifications
+                for t in threads {
+                    guard !seen.contains(t.id) else { continue }
+                    seen.insert(t.id)
+                    merged.append(t)
+                }
+                self.notifications = merged
+
+                self.nextNotificationsPage = hasNext ? (page + 1) : nil
+                self.hasMoreNotifications = self.nextNotificationsPage != nil
+
+                let ids = Set(merged.map { $0.id })
+                self.subjectDetailsByThreadId = self.subjectDetailsByThreadId.filter { ids.contains($0.key) }
+            }
+        }
+    }
+
+    func prefetchSubjectDetails(for threads: [GitHubNotificationThread]) {
+        self.detailsTask?.cancel()
+
+        let token = self.githubToken
+        let targets = threads.compactMap { thread -> (String, URL)? in
+            guard subjectDetailsByThreadId[thread.id] == nil else { return nil }
+            guard let url = thread.subject.url else { return nil }
+            return (thread.id, url)
+        }
+
+        guard !targets.isEmpty, !token.isEmpty else {
+            return
+        }
+
+#if DEBUG
+        AppLog.debug("Prefetch subject details: \(targets.count) targets")
+#endif
+
+        self.detailsTask = Task.detached(priority: .utility) { [weak self] in
+            guard let self else { return }
+            let api = GitHubAPIClient(token: token)
+
+            let maxInFlight = 4
+            await withTaskGroup(of: (String, GitHubSubjectDetails?).self) { group in
+                var it = targets.makeIterator()
+
+                for _ in 0..<maxInFlight {
+                    guard let (id, url) = it.next() else { break }
+                    group.addTask {
+                        let details = await api.fetchSubjectDetails(subjectURL: url)
+                        return (id, details)
+                    }
+                }
+
+                while let (id, details) = await group.next() {
+                    if let details {
+                        await MainActor.run {
+                            self.subjectDetailsByThreadId[id] = details
                         }
-                } else {
-                    let err  = String(decoding: data, as: UTF8.self)
-                    errMsg = "bad request: \(httpResponse.statusCode), \(err)"
-                    print(err)
+                    }
+
+                    if let (nextId, nextURL) = it.next() {
+                        group.addTask {
+                            let details = await api.fetchSubjectDetails(subjectURL: nextURL)
+                            return (nextId, details)
+                        }
+                    }
                 }
             }
-        } catch {
-            errMsg = "cannot request, please check network or firewall"
-            print("cannot request：\(error)")
         }
-        return ([], false, errMsg)
+    }
+
+    func urlForOpeningNotificationDetail(threadId: String, baseURL: URL) -> URL {
+        guard let viewerUserId else {
+            ensureViewerUserId()
+            return baseURL
+        }
+        return GitHubNotificationReferrerId.appending(to: baseURL, threadId: threadId, userId: viewerUserId)
+    }
+
+    private func ensureViewerUserId() {
+        guard viewerUserId == nil else { return }
+        guard viewerFetchTask == nil else { return }
+
+        let token = githubToken
+        guard !token.isEmpty else { return }
+
+        let task = Task.detached(priority: .utility) { [token] () async -> Int64? in
+            do {
+                let api = GitHubAPIClient(token: token)
+                let viewer = try await api.fetchViewer()
+                guard !Task.isCancelled else { return nil }
+                return viewer.id
+            } catch {
+                // Best-effort only. The app still works without this value.
+                return nil
+            }
+        }
+
+        viewerFetchTask = task
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let id = await task.value
+            guard self.githubToken == token else { return }
+            if let id {
+                self.viewerUserId = id
+            }
+            self.viewerFetchTask = nil
+        }
     }
     
     func testGithubToken() async -> (Bool, String) {
-        let (notifications, ok, err) = await pull(githubToken: self.githubToken)
-        if ok {
-            self.notifications = notifications
-        }
+        let token = self.githubToken
+        let (_, ok, _, err) = await fetchNotificationThreads(
+            githubToken: token,
+            page: 1,
+            perPage: 1
+        )
         return (ok, err)
     }
 }

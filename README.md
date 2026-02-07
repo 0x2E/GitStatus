@@ -1,14 +1,23 @@
 # GitStatus
 
-Show GitHub notifications on menubar (macOS 13.0+).
+Show GitHub notifications on menubar.
 
 <p align="center">
   <img src="./assets/screenshot.png" alt="preview">
 </p>
 
+## Features
+
+- Native macOS menu bar app (macOS 14+)
+- Configurable refresh interval and other settings
+- Click to open notification details
+
+## Usage
+
+1. Download the latest build from [Releases](https://github.com/0x2E/GitStatus/releases).
+2. Open Settings and fill in the required configuration (e.g. GitHub token).
+
 ## Credits
 
 - vector icon in app logo: [bytedance/IconPark](https://github.com/bytedance/IconPark)
-- vector icon in menubar: [tabler-icons](https://tabler-icons.io/i/message-2-code)
-- figma plugin: [Xcode App Icon Exporter](https://www.figma.com/community/plugin/1100675815076145179/xcode-app-icon-exporter)
-- build dmg: [sindresorhus/create-dmg](https://github.com/sindresorhus/create-dmg)
+- vector icon in menubar: [lucide icons](https://lucide.dev/icons/git-branch)
