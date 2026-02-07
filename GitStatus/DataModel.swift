@@ -67,6 +67,32 @@ struct GitHubSubjectDetails: Equatable {
     let participants: [GitHubUser]
 }
 
+enum GitHubNotificationReferrerId {
+    private static let queryName = "notification_referrer_id"
+
+    static func value(threadId: String, userId: Int64) -> String {
+        // Matches GitHub's tracking format used when opening a notification thread from the inbox.
+        // Example raw string: "018:NotificationThread138661096:123456789"
+        let raw = "018:NotificationThread\(threadId):\(userId)"
+        return Data(raw.utf8).base64EncodedString()
+    }
+
+    static func appending(to url: URL, threadId: String, userId: Int64) -> URL {
+        guard var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
+            return url
+        }
+
+        var items = components.queryItems ?? []
+        guard !items.contains(where: { $0.name == queryName }) else {
+            return url
+        }
+
+        items.append(URLQueryItem(name: queryName, value: value(threadId: threadId, userId: userId)))
+        components.queryItems = items
+        return components.url ?? url
+    }
+}
+
 func fetchNotificationThreads(
     githubToken: String,
     page: Int = 1,
@@ -173,6 +199,10 @@ struct GitHubAPIClient {
         try await fetch(URL(string: "https://api.github.com/notifications")!)
     }
 
+    func fetchViewer() async throws -> GitHubUser {
+        try await fetch(URL(string: "https://api.github.com/user")!)
+    }
+
     private func linkHeaderHasNextPage(_ linkHeader: String?) -> Bool {
         guard let linkHeader, !linkHeader.isEmpty else { return false }
         // Format: <url>; rel="next", <url>; rel="last"
@@ -272,6 +302,8 @@ struct GitHubAPIClient {
     @Published var notifications: [GitHubNotificationThread] = []
     @Published var subjectDetailsByThreadId: [String: GitHubSubjectDetails] = [:]
 
+    @Published private(set) var viewerUserId: Int64? = nil
+
     @Published private(set) var isLoadingMoreNotifications: Bool = false
     @Published private(set) var hasMoreNotifications: Bool = false
     @Published private(set) var loadMoreError: String = ""
@@ -303,6 +335,7 @@ struct GitHubAPIClient {
     private var detailsTask: Task<Void, Never>?
     private var loadMoreTask: Task<Void, Never>?
     private var tokenDebounceTask: Task<Void, Never>?
+    private var viewerFetchTask: Task<Int64?, Never>?
     @Published var lastPull: Date?
 
     private var nextNotificationsPage: Int? = nil
@@ -312,6 +345,10 @@ struct GitHubAPIClient {
             UserDefaults.standard.set(newValue, forKey: "githubToken")
         }
         didSet {
+            viewerFetchTask?.cancel()
+            viewerFetchTask = nil
+            viewerUserId = nil
+
             tokenDebounceTask?.cancel()
             let interval = self.interval
             tokenDebounceTask = Task(priority: .utility) { [weak self] in
@@ -377,6 +414,8 @@ struct GitHubAPIClient {
         
         let token = self.githubToken
         let perPage = notificationsPerPage
+
+        ensureViewerUserId()
         pullTask = Task.detached(priority: .utility) { [weak self] in
             guard let self else { return }
             var failsCount = 0
@@ -526,6 +565,45 @@ struct GitHubAPIClient {
                     }
                 }
             }
+        }
+    }
+
+    func urlForOpeningNotificationDetail(threadId: String, baseURL: URL) -> URL {
+        guard let viewerUserId else {
+            ensureViewerUserId()
+            return baseURL
+        }
+        return GitHubNotificationReferrerId.appending(to: baseURL, threadId: threadId, userId: viewerUserId)
+    }
+
+    private func ensureViewerUserId() {
+        guard viewerUserId == nil else { return }
+        guard viewerFetchTask == nil else { return }
+
+        let token = githubToken
+        guard !token.isEmpty else { return }
+
+        let task = Task.detached(priority: .utility) { [token] () async -> Int64? in
+            do {
+                let api = GitHubAPIClient(token: token)
+                let viewer = try await api.fetchViewer()
+                guard !Task.isCancelled else { return nil }
+                return viewer.id
+            } catch {
+                // Best-effort only. The app still works without this value.
+                return nil
+            }
+        }
+
+        viewerFetchTask = task
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let id = await task.value
+            guard self.githubToken == token else { return }
+            if let id {
+                self.viewerUserId = id
+            }
+            self.viewerFetchTask = nil
         }
     }
     

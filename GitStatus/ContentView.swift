@@ -148,9 +148,9 @@ struct ContentView: View {
                         NotificationRowView(
                             thread: thread,
                             details: runtimeData.subjectDetailsByThreadId[thread.id],
-                            onOpen: { url in
+                            onOpen: { thread, url in
                                 closeMenuWindowIfPossible()
-                                openURL(url)
+                                openURL(runtimeData.urlForOpeningNotificationDetail(threadId: thread.id, baseURL: url))
                             }
                         )
                     }

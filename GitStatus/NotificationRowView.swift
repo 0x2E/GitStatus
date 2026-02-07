@@ -4,7 +4,7 @@ import SwiftUI
 struct NotificationRowView: View {
     let thread: GitHubNotificationThread
     let details: GitHubSubjectDetails?
-    let onOpen: (URL) -> Void
+    let onOpen: (GitHubNotificationThread, URL) -> Void
 
     @State private var isHovering = false
 
@@ -13,7 +13,7 @@ struct NotificationRowView: View {
 
         Button {
             guard let url else { return }
-            onOpen(url)
+            onOpen(thread, url)
         } label: {
             VStack(alignment: .leading, spacing: 6) {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
