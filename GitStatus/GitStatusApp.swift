@@ -9,33 +9,53 @@ import SwiftUI
 
 @main
 struct GitStatusApp: App {
-    @ObservedObject var runtimeData = RuntimeData().run()
-    
-    var body: some Scene {
-        Settings{
-            SettingView()
-                .environmentObject(runtimeData)
+    init() {
+        AppLog.bootstrap()
+        AppLog.info("App launch")
+        Task { @MainActor in
+            RuntimeData.shared.start()
         }
-        
+    }
+
+    var body: some Scene {
         MenuBarExtra {
             ContentView()
-                .environmentObject(runtimeData)
+                .environmentObject(RuntimeData.shared)
+                .frame(width: 420, height: 520)
         } label: {
-            // https://mirzoyan.dev/mirzoyan%20dev%20d62e6ab9344e4ab8a9c14205257ea2cc/Blog%20208f3509a5b74655b973d4dbaaf500e6/Custom%20icon%20for%20SwiftUI%20MenuBarExtra%20fdd31ec3e0af46adb3f7f69129bd6172
-            let image: NSImage = {
-                    let ratio = $0.size.height / $0.size.width
-                    $0.size.height = 20
-                    $0.size.width = 20 / ratio
-                    return $0
-                }(NSImage(named: "MenubarIcon")!)
+            MenuBarLabelView()
+                .environmentObject(RuntimeData.shared)
+        }
+        .menuBarExtraStyle(.window)
 
-                Image(nsImage: image)
-            
-            if runtimeData.notifications.count > 0 {
-                Text(runtimeData.notifications.count, format: .number)
+        WindowGroup(id: "settings") {
+            SettingView()
+                .environmentObject(RuntimeData.shared)
+        }
+        .defaultSize(width: 720, height: 520)
+    }
+}
+
+private struct MenuBarLabelView: View {
+    @EnvironmentObject private var runtimeData: RuntimeData
+
+    var body: some View {
+        let count = runtimeData.notifications.count
+        let hasError = !runtimeData.message.isEmpty
+
+        HStack(spacing: 4) {
+            Image("MenubarIcon")
+                .renderingMode(.template)
+                .resizable()
+                .scaledToFit()
+                .frame(width: 18, height: 18)
+
+            if count > 0 {
+                Text("\(count)")
+                    .monospacedDigit()
             }
-            
-            if !runtimeData.message.isEmpty {
+
+            if hasError {
                 Text("!")
             }
         }
