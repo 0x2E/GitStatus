@@ -15,7 +15,7 @@ struct ContentView: View {
     @Environment(\.dismiss) private var dismiss
      
     var body: some View {
-        ZStack {
+        ZStack(alignment: .topLeading) {
             VisualEffectView(material: .menu, blendingMode: .withinWindow)
 
             VStack(alignment: .leading, spacing: 12) {
@@ -24,6 +24,7 @@ struct ContentView: View {
                 content
             }
             .padding(12)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
         .frame(width: 420)
         .task(id: prefetchKey) {
