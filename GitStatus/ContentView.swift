@@ -8,6 +8,30 @@
 import AppKit
 import SwiftUI
 
+enum MenuPanelLayout {
+    static let width: CGFloat = 360
+    static let maxListHeight: CGFloat = 360
+    static let rowHeight: CGFloat = 52
+    static let loadMoreHeight: CGFloat = 40
+    static let loadMoreErrorHeight: CGFloat = 22
+
+    static func listHeight(
+        itemCount: Int,
+        showsLoadMore: Bool,
+        showsLoadMoreError: Bool
+    ) -> CGFloat {
+        guard itemCount > 0 else { return 0 }
+        var height = CGFloat(itemCount) * rowHeight
+        if showsLoadMore {
+            height += loadMoreHeight
+        }
+        if showsLoadMoreError {
+            height += loadMoreErrorHeight
+        }
+        return min(height, maxListHeight)
+    }
+}
+
 struct ContentView: View {
     @Environment(RuntimeData.self) private var runtimeData
     @Environment(\.openURL) private var openURL
@@ -15,18 +39,29 @@ struct ContentView: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        ZStack(alignment: .topLeading) {
-            VisualEffectView(material: .menu, blendingMode: .withinWindow)
+        VStack(spacing: 0) {
+            header
+                .padding(.horizontal, 12)
+                .padding(.top, 10)
+                .padding(.bottom, 8)
 
-            VStack(alignment: .leading, spacing: 12) {
-                header
-                Divider()
-                content
-            }
-            .padding(12)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            Divider()
+
+            content
+                .padding(.horizontal, 8)
+                .padding(.vertical, 6)
+
+            Divider()
+
+            footer
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
         }
-        .frame(width: 420)
+        .frame(width: MenuPanelLayout.width)
+        .fixedSize(horizontal: false, vertical: true)
+        .background {
+            VisualEffectView(material: .menu, blendingMode: .withinWindow)
+        }
         .task(id: prefetchKey) {
             guard runtimeData.message.isEmpty else { return }
             guard !runtimeData.notifications.isEmpty else { return }
@@ -39,104 +74,86 @@ struct ContentView: View {
     }
 
     private var header: some View {
-        HStack(alignment: .center, spacing: 10) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Notifications")
+        HStack(alignment: .center, spacing: 8) {
+            VStack(alignment: .leading, spacing: 1) {
+                Text(titleText)
                     .font(.headline)
-                Text(subtitle)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                if let subtitleText {
+                    Text(subtitleText)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
             }
 
             Spacer(minLength: 8)
 
-            Button {
+            headerButton(systemName: "arrow.clockwise", help: "Refresh") {
                 runtimeData.renewPullTask(interval: runtimeData.interval, force: true)
-            } label: {
-                Image(systemName: "arrow.clockwise")
-                    .symbolRenderingMode(.hierarchical)
-                    .font(.system(size: 14))
-                    .frame(width: 24, height: 24)
             }
-            .buttonStyle(.borderless)
-            .controlSize(.regular)
-            .help("Refresh")
 
-            Button {
+            headerButton(systemName: "arrow.up.right.square", help: "Open in GitHub") {
+                closeMenuWindowIfPossible()
                 openURL(GitHubEndpoint.notificationsWeb)
-            } label: {
-                Image(systemName: "safari")
-                    .symbolRenderingMode(.hierarchical)
-                    .font(.system(size: 14))
-                    .frame(width: 24, height: 24)
             }
-            .buttonStyle(.borderless)
-            .controlSize(.regular)
-            .help("Open in Browser")
-
-            Button {
-                NSApp.activate(ignoringOtherApps: true)
-                openWindow(id: "settings")
-            } label: {
-                Image(systemName: "gearshape")
-                    .symbolRenderingMode(.hierarchical)
-                    .font(.system(size: 14))
-                    .frame(width: 24, height: 24)
-            }
-            .buttonStyle(.borderless)
-            .controlSize(.regular)
-            .help("Settings")
-
-            Button {
-                NSApplication.shared.terminate(nil)
-            } label: {
-                Image(systemName: "power")
-                    .symbolRenderingMode(.hierarchical)
-                    .font(.system(size: 14))
-                    .frame(width: 24, height: 24)
-            }
-            .buttonStyle(.borderless)
-            .controlSize(.regular)
-            .help("Quit")
-            .keyboardShortcut("q")
         }
     }
 
-    private var subtitle: String {
-        if !runtimeData.message.isEmpty {
+    private var footer: some View {
+        HStack {
+            Button("Settings") {
+                closeMenuWindowIfPossible()
+                NSApp.activate(ignoringOtherApps: true)
+                openWindow(id: "settings")
+            }
+
+            Spacer()
+
+            Button("Quit") {
+                NSApplication.shared.terminate(nil)
+            }
+            .keyboardShortcut("q")
+        }
+        .buttonStyle(.borderless)
+        .font(.caption)
+        .foregroundStyle(.secondary)
+    }
+
+    private var titleText: String {
+        if !runtimeData.message.isEmpty && runtimeData.notifications.isEmpty {
             return "Error"
         }
-
-        let countText: String
         if runtimeData.notifications.isEmpty {
-            countText = "All caught up"
-        } else if runtimeData.hasMoreNotifications {
-            countText = "Loaded \(runtimeData.notifications.count)+"
-        } else {
-            countText = "Loaded \(runtimeData.notifications.count)"
+            return "All caught up"
         }
+        if runtimeData.hasMoreNotifications {
+            return "\(runtimeData.notifications.count)+ unread"
+        }
+        let count = runtimeData.notifications.count
+        return count == 1 ? "1 unread" : "\(count) unread"
+    }
 
-        if let lastPull = runtimeData.lastPull {
-            return "\(countText) · Updated \(lastPull.formatted(.relative(presentation: .named)))"
+    private var subtitleText: String? {
+        guard runtimeData.message.isEmpty || !runtimeData.notifications.isEmpty else {
+            return nil
         }
-        return countText
+        guard let lastPull = runtimeData.lastPull else { return nil }
+        return "Updated \(lastPull.formatted(.relative(presentation: .named)))"
     }
 
     private var errorStatus: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .top, spacing: 10) {
-                Image(systemName: "exclamationmark.triangle")
-                    .foregroundStyle(.secondary)
-                Text(runtimeData.message)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+            Text(runtimeData.message)
+                .fixedSize(horizontal: false, vertical: true)
 
             Button("Retry") {
                 runtimeData.renewPullTask(interval: runtimeData.interval, force: true)
             }
             .buttonStyle(.link)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 4)
+        .padding(.vertical, 8)
     }
 
     @ViewBuilder
@@ -144,15 +161,13 @@ struct ContentView: View {
         if !runtimeData.message.isEmpty && runtimeData.notifications.isEmpty {
             errorStatus
         } else if runtimeData.notifications.isEmpty {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("All caught up")
-                    .font(.headline)
-                Text("New notifications will appear here.")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            Text("New notifications will appear here.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 20)
         } else {
             VStack(alignment: .leading, spacing: 8) {
                 if !runtimeData.message.isEmpty {
@@ -174,7 +189,7 @@ struct ContentView: View {
                         }
 
                         if runtimeData.isLoadingMoreNotifications {
-                            HStack(spacing: 10) {
+                            HStack(spacing: 8) {
                                 Spacer()
                                 ProgressView()
                                     .controlSize(.small)
@@ -198,22 +213,41 @@ struct ContentView: View {
                         }
 
                         if !runtimeData.loadMoreError.isEmpty {
-                            HStack {
-                                Spacer()
-                                Text(runtimeData.loadMoreError)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(2)
-                                Spacer()
-                            }
-                            .padding(.bottom, 6)
+                            Text(runtimeData.loadMoreError)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.center)
+                                .lineLimit(2)
+                                .frame(maxWidth: .infinity)
+                                .padding(.bottom, 6)
                         }
                     }
-                    .padding(.vertical, 2)
                 }
-                .frame(minHeight: 220, idealHeight: 360, maxHeight: 420)
+                .scrollBounceBehavior(.basedOnSize)
+                .frame(height: listHeight)
             }
         }
+    }
+
+    private var listHeight: CGFloat {
+        MenuPanelLayout.listHeight(
+            itemCount: runtimeData.notifications.count,
+            showsLoadMore: runtimeData.hasMoreNotifications || runtimeData.isLoadingMoreNotifications,
+            showsLoadMoreError: !runtimeData.loadMoreError.isEmpty
+        )
+    }
+
+    @ViewBuilder
+    private func headerButton(systemName: String, help: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .symbolRenderingMode(.hierarchical)
+                .font(.system(size: 13))
+                .frame(width: 22, height: 22)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.borderless)
+        .help(help)
     }
 
     @MainActor

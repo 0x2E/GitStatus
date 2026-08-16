@@ -17,6 +17,44 @@ func sizedGitHubAvatarURL(_ url: URL, pixelSize: Int) -> URL {
     return components?.url ?? url
 }
 
+enum NotificationTime {
+    static func compact(
+        _ date: Date,
+        now: Date = .now,
+        calendar: Calendar = .current,
+        locale: Locale = .current
+    ) -> String {
+        let seconds = now.timeIntervalSince(date)
+        if seconds < 45 {
+            return "now"
+        }
+        if seconds < 3600 {
+            return "\(max(1, Int(seconds / 60)))m"
+        }
+        if seconds < 86_400 {
+            return "\(max(1, Int(seconds / 3600)))h"
+        }
+        if seconds < 86_400 * 7 {
+            return "\(max(1, Int(seconds / 86_400)))d"
+        }
+
+        let timeZone = calendar.timeZone
+        if calendar.component(.year, from: date) == calendar.component(.year, from: now) {
+            return date.formatted(
+                Date.FormatStyle(locale: locale, calendar: calendar, timeZone: timeZone)
+                    .month(.abbreviated)
+                    .day()
+            )
+        }
+        return date.formatted(
+            Date.FormatStyle(locale: locale, calendar: calendar, timeZone: timeZone)
+                .year()
+                .month(.abbreviated)
+                .day()
+        )
+    }
+}
+
 struct NotificationRowView: View {
     let thread: GitHubNotificationThread
     let details: GitHubSubjectDetails?
@@ -31,46 +69,52 @@ struct NotificationRowView: View {
             guard let url else { return }
             onOpen(thread, url)
         } label: {
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Image(systemName: subjectTypeIconName(thread.subject.type))
-                        .symbolRenderingMode(.hierarchical)
-                        .frame(width: 18)
-                        .foregroundStyle(thread.unread ? .primary : .secondary)
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: subjectTypeIconName(thread.subject.type))
+                    .symbolRenderingMode(.hierarchical)
+                    .font(.system(size: 12))
+                    .frame(width: 18, height: 16)
+                    .padding(.top, 1)
+                    .foregroundStyle(thread.unread ? .primary : .secondary)
 
-                    Text(thread.repository.fullName)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text(thread.subject.title)
+                            .font(.body)
+                            .fontWeight(thread.unread ? .medium : .regular)
+                            .lineLimit(1)
 
-                    Spacer(minLength: 8)
+                        Spacer(minLength: 8)
 
-                    Text(thread.updatedAt.formatted(date: .abbreviated, time: .shortened))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
+                        Text(NotificationTime.compact(thread.updatedAt))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
+                            .layoutPriority(1)
+                    }
 
-                Text(thread.subject.title)
-                    .font(.body)
-                    .fontWeight(thread.unread ? .semibold : .regular)
-                    .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
+                    HStack(spacing: 8) {
+                        Text(thread.repository.fullName)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
 
-                if !participants.isEmpty {
-                    AvatarStackView(users: participants)
+                        Spacer(minLength: 6)
+
+                        if !participants.isEmpty {
+                            AvatarStackView(users: participants)
+                        }
+                    }
                 }
             }
-            .padding(.vertical, 8)
-            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .padding(.horizontal, 8)
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
+            .opacity(thread.unread ? 1 : 0.65)
             .background {
-                if isHovering {
-                    VisualEffectView(material: .selection, blendingMode: .withinWindow)
-                        .clipShape(.rect(cornerRadius: 8, style: .continuous))
-                        .opacity(0.55)
-                        .transition(.opacity)
-                        .allowsHitTesting(false)
-                }
+                Color.primary.opacity(isHovering ? 0.08 : 0)
+                    .clipShape(.rect(cornerRadius: 8, style: .continuous))
             }
         }
         .buttonStyle(.plain)
@@ -130,7 +174,7 @@ private struct AvatarImageView: View {
     @Environment(\.displayScale) private var displayScale
 
     var body: some View {
-        AsyncImage(url: sizedGitHubAvatarURL(url, pixelSize: githubAvatarPixelSize(scale: displayScale))) { phase in
+        AsyncImage(url: sizedGitHubAvatarURL(url, pixelSize: githubAvatarPixelSize(pointSize: 16, scale: displayScale))) { phase in
             switch phase {
             case .success(let image):
                 image
@@ -141,7 +185,7 @@ private struct AvatarImageView: View {
                     .fill(Color.secondary.opacity(0.2))
             }
         }
-        .frame(width: 18, height: 18)
+        .frame(width: 16, height: 16)
         .clipShape(.circle)
         .overlay(
             Circle()
