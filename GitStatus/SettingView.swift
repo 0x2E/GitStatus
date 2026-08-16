@@ -259,7 +259,7 @@ private struct TokenSettingsView: View {
                 }
 
                 Section("Help") {
-                    Link("Open token settings", destination: URL(string: "https://github.com/settings/tokens")!)
+                    Link("Open token settings", destination: GitHubEndpoint.tokenSettings)
                 }
             }
             .formStyle(.grouped)
@@ -304,8 +304,8 @@ private struct AboutSettingsView: View {
 
             Form {
                 Section("Links") {
-                    Link("GitHub repository", destination: URL(string: "https://github.com/0x2E/GitStatus")!)
-                    Link("Report an issue", destination: URL(string: "https://github.com/0x2E/GitStatus/issues")!)
+                    Link("GitHub repository", destination: GitHubEndpoint.projectRepository)
+                    Link("Report an issue", destination: GitHubEndpoint.projectIssues)
                 }
 
                 Section {

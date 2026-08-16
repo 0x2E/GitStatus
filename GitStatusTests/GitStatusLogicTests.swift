@@ -12,24 +12,21 @@ final class GitStatusLogicTests: XCTestCase {
         let pull = GitHubNotificationThread.Subject(
             title: "Fix bug",
             type: "PullRequest",
-            url: URL(string: "https://api.github.com/repos/foo/bar/pulls/12"),
-            latestCommentUrl: nil
+            url: URL(string: "https://api.github.com/repos/foo/bar/pulls/12")
         )
         XCTAssertEqual(pull.preferredWebURL()?.absoluteString, "https://github.com/foo/bar/pull/12")
 
         let commit = GitHubNotificationThread.Subject(
             title: "sha",
             type: "Commit",
-            url: URL(string: "https://api.github.com/repos/foo/bar/commits/abc"),
-            latestCommentUrl: nil
+            url: URL(string: "https://api.github.com/repos/foo/bar/commits/abc")
         )
         XCTAssertEqual(commit.preferredWebURL()?.absoluteString, "https://github.com/foo/bar/commit/abc")
 
         let issue = GitHubNotificationThread.Subject(
             title: "Issue",
             type: "Issue",
-            url: URL(string: "https://api.github.com/repos/foo/bar/issues/3"),
-            latestCommentUrl: nil
+            url: URL(string: "https://api.github.com/repos/foo/bar/issues/3")
         )
         XCTAssertEqual(issue.preferredWebURL()?.absoluteString, "https://github.com/foo/bar/issues/3")
     }
@@ -38,8 +35,7 @@ final class GitStatusLogicTests: XCTestCase {
         let subject = GitHubNotificationThread.Subject(
             title: "Missing",
             type: "Issue",
-            url: nil,
-            latestCommentUrl: nil
+            url: nil
         )
         XCTAssertNil(subject.preferredWebURL())
     }
@@ -86,6 +82,13 @@ final class GitStatusLogicTests: XCTestCase {
         let visible = LocalDismissal.visibleIDs(from: ["pending", "other"], dismissed: &dismissed)
         XCTAssertEqual(visible, ["other"])
         XCTAssertEqual(dismissed, ["pending"])
+    }
+
+    func testAvatarPixelSizeRoundsUpToMultipleOfTen() {
+        XCTAssertEqual(githubAvatarPixelSize(pointSize: 18, scale: 2), 40)
+        XCTAssertEqual(githubAvatarPixelSize(pointSize: 18, scale: 3), 60)
+        XCTAssertEqual(githubAvatarPixelSize(pointSize: 18, scale: 1), 20)
+        XCTAssertEqual(githubAvatarPixelSize(pointSize: 18, scale: 0), 40)
     }
 
     func testSizedAvatarURLAddsPixelSizeOnce() {

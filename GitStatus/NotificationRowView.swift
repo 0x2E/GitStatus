@@ -1,7 +1,13 @@
 import AppKit
 import SwiftUI
 
-func sizedGitHubAvatarURL(_ url: URL, pixelSize: Int = 64) -> URL {
+func githubAvatarPixelSize(pointSize: CGFloat = 18, scale: CGFloat) -> Int {
+    let safeScale = scale > 0 ? scale : 2
+    let raw = Int((pointSize * safeScale).rounded(.up))
+    return max(10, ((raw + 9) / 10) * 10)
+}
+
+func sizedGitHubAvatarURL(_ url: URL, pixelSize: Int) -> URL {
     var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
     var items = components?.queryItems ?? []
     if !items.contains(where: { $0.name == "s" }) {
@@ -27,12 +33,10 @@ struct NotificationRowView: View {
         } label: {
             VStack(alignment: .leading, spacing: 6) {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    ZStack {
-                        Image(systemName: subjectTypeIconName(thread.subject.type))
-                            .symbolRenderingMode(.hierarchical)
-                            .frame(width: 18)
-                            .foregroundStyle(thread.unread ? .primary : .secondary)
-                    }
+                    Image(systemName: subjectTypeIconName(thread.subject.type))
+                        .symbolRenderingMode(.hierarchical)
+                        .frame(width: 18)
+                        .foregroundStyle(thread.unread ? .primary : .secondary)
 
                     Text(thread.repository.fullName)
                         .font(.subheadline)
@@ -112,8 +116,8 @@ struct AvatarStackView: View {
 
     var body: some View {
         HStack(spacing: -6) {
-            ForEach(users.prefix(5)) { user in
-                AvatarImageView(url: user.avatarUrl)
+            ForEach(users) { user in
+                AvatarImageView(url: user.avatarUrl, login: user.login)
             }
         }
     }
@@ -121,9 +125,12 @@ struct AvatarStackView: View {
 
 private struct AvatarImageView: View {
     let url: URL
+    let login: String
+
+    @Environment(\.displayScale) private var displayScale
 
     var body: some View {
-        AsyncImage(url: sizedGitHubAvatarURL(url)) { phase in
+        AsyncImage(url: sizedGitHubAvatarURL(url, pixelSize: githubAvatarPixelSize(scale: displayScale))) { phase in
             switch phase {
             case .success(let image):
                 image
@@ -135,11 +142,12 @@ private struct AvatarImageView: View {
             }
         }
         .frame(width: 18, height: 18)
-        .clipShape(Circle())
+        .clipShape(.circle)
         .overlay(
             Circle()
-                .stroke(Color(NSColor.separatorColor).opacity(0.8), lineWidth: 1)
+                .stroke(Color(nsColor: .separatorColor).opacity(0.8), lineWidth: 1)
         )
+        .help(login)
     }
 }
 
