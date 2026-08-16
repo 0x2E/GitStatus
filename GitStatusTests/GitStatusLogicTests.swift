@@ -100,6 +100,71 @@ final class GitStatusLogicTests: XCTestCase {
         XCTAssertEqual(URLComponents(url: again, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "s" })?.value, "40")
     }
 
+    func testCompactNotificationTimeUsesShortUnitsThenDate() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let locale = Locale(identifier: "en_US_POSIX")
+        let now = try XCTUnwrap(GitHubDate.parse("2026-02-07T12:00:00Z"))
+
+        XCTAssertEqual(
+            NotificationTime.compact(now.addingTimeInterval(-10), now: now, calendar: calendar, locale: locale),
+            "now"
+        )
+        XCTAssertEqual(
+            NotificationTime.compact(now.addingTimeInterval(30), now: now, calendar: calendar, locale: locale),
+            "now"
+        )
+        XCTAssertEqual(
+            NotificationTime.compact(now.addingTimeInterval(-120), now: now, calendar: calendar, locale: locale),
+            "2m"
+        )
+        XCTAssertEqual(
+            NotificationTime.compact(now.addingTimeInterval(-7200), now: now, calendar: calendar, locale: locale),
+            "2h"
+        )
+        XCTAssertEqual(
+            NotificationTime.compact(now.addingTimeInterval(-86_400 * 3), now: now, calendar: calendar, locale: locale),
+            "3d"
+        )
+        XCTAssertEqual(
+            NotificationTime.compact(
+                try XCTUnwrap(GitHubDate.parse("2026-01-26T12:00:00Z")),
+                now: now,
+                calendar: calendar,
+                locale: locale
+            ),
+            "Jan 26"
+        )
+        XCTAssertEqual(
+            NotificationTime.compact(
+                try XCTUnwrap(GitHubDate.parse("2025-01-26T12:00:00Z")),
+                now: now,
+                calendar: calendar,
+                locale: locale
+            ),
+            "Jan 26, 2025"
+        )
+    }
+
+    func testMenuPanelListHeightHugsThenCaps() {
+        XCTAssertEqual(
+            MenuPanelLayout.listHeight(itemCount: 0, showsLoadMore: false, showsLoadMoreError: false),
+            0
+        )
+        XCTAssertEqual(
+            MenuPanelLayout.listHeight(itemCount: 4, showsLoadMore: false, showsLoadMoreError: false),
+            208
+        )
+        XCTAssertEqual(
+            MenuPanelLayout.listHeight(itemCount: 4, showsLoadMore: true, showsLoadMoreError: false),
+            248
+        )
+        XCTAssertEqual(
+            MenuPanelLayout.listHeight(itemCount: 10, showsLoadMore: true, showsLoadMoreError: false),
+            MenuPanelLayout.maxListHeight
+        )
+    }
+
     func testAPIErrorMessagesDoNotLeakResponseBodies() {
         XCTAssertEqual(GitHubAPIClient.APIError.invalidResponse.userMessage, "Invalid response from GitHub")
         XCTAssertEqual(GitHubAPIClient.APIError.httpError(statusCode: 401, body: "secret").userMessage, "Invalid GitHub token")

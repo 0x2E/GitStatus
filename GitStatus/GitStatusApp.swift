@@ -21,7 +21,6 @@ struct GitStatusApp: App {
         MenuBarExtra {
             ContentView()
                 .environment(RuntimeData.shared)
-                .frame(width: 420, height: 520)
         } label: {
             MenuBarLabelView()
                 .environment(RuntimeData.shared)
