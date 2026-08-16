@@ -4,6 +4,7 @@
 //
 
 import AppKit
+import ServiceManagement
 import SwiftUI
 
 private enum AppVersion {
@@ -48,7 +49,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
 }
 
 struct SettingView: View {
-    @EnvironmentObject private var runtimeData: RuntimeData
+    @Environment(RuntimeData.self) private var runtimeData
     @State private var selection: SettingsSection = .general
 
     var body: some View {
@@ -77,10 +78,10 @@ struct SettingView: View {
                 switch selection {
                 case .general:
                     GeneralSettingsView()
-                        .environmentObject(runtimeData)
+                        .environment(runtimeData)
                 case .token:
                     TokenSettingsView()
-                        .environmentObject(runtimeData)
+                        .environment(runtimeData)
                 case .about:
                     AboutSettingsView()
                 }
@@ -112,7 +113,8 @@ struct SettingView: View {
 }
 
 private struct GeneralSettingsView: View {
-    @EnvironmentObject private var runtimeData: RuntimeData
+    @Environment(RuntimeData.self) private var runtimeData
+    @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
 
     private var listLengthBinding: Binding<Int> {
         Binding(
@@ -124,14 +126,16 @@ private struct GeneralSettingsView: View {
     private var intervalBinding: Binding<Int> {
         Binding(
             get: { runtimeData.interval },
-            set: { runtimeData.interval = min(max($0, 30), 3600) }
+            set: { runtimeData.interval = min(max($0, PollTiming.minimumInterval), 3600) }
         )
     }
- 
+
     var body: some View {
         ScrollView {
             Form {
                 Section {
+                    Toggle("Launch at login", isOn: launchAtLoginBinding)
+
                     LabeledContent("Items per page") {
                         HStack(spacing: 10) {
                             TextField("", value: listLengthBinding, format: .number)
@@ -160,7 +164,7 @@ private struct GeneralSettingsView: View {
                             Text("s")
                                 .foregroundStyle(.secondary)
 
-                            Stepper(value: intervalBinding, in: 30...3600, step: 30) {
+                            Stepper(value: intervalBinding, in: PollTiming.minimumInterval...3600, step: 30) {
                                 EmptyView()
                             }
                             .labelsHidden()
@@ -169,7 +173,7 @@ private struct GeneralSettingsView: View {
                 } header: {
                     Text("Notifications")
                 } footer: {
-                    Text("GitHub API has rate limits (commonly 5000 requests/hour per user).")
+                    Text("GitHub recommends polling at most once per minute. Unchanged inboxes can return 304 and do not count against the rate limit.")
                 }
             }
             .formStyle(.grouped)
@@ -178,10 +182,29 @@ private struct GeneralSettingsView: View {
         }
         .navigationTitle("General")
     }
+
+    private var launchAtLoginBinding: Binding<Bool> {
+        Binding(
+            get: { launchAtLogin },
+            set: { newValue in
+                do {
+                    if newValue {
+                        try SMAppService.mainApp.register()
+                    } else {
+                        try SMAppService.mainApp.unregister()
+                    }
+                } catch {
+                    AppLog.warning("Launch at login failed: \(error.localizedDescription)")
+                }
+                launchAtLogin = SMAppService.mainApp.status == .enabled
+            }
+        )
+    }
 }
 
 private struct TokenSettingsView: View {
-    @EnvironmentObject private var runtimeData: RuntimeData
+    @Environment(RuntimeData.self) private var runtimeData
+    @State private var tokenDraft = ""
     @State private var tokenChecking = false
     @State private var showTokenAlert = false
     @State private var tokenAlertTitle = ""
@@ -191,19 +214,25 @@ private struct TokenSettingsView: View {
         ScrollView {
             Form {
                 Section {
-                    SecureField("Personal access token", text: $runtimeData.githubToken)
+                    SecureField("Personal access token", text: $tokenDraft)
                         .textContentType(.password)
                         .disabled(tokenChecking)
+                        .onSubmit {
+                            persistTokenIfNeeded()
+                        }
 
                     HStack(spacing: 10) {
                         Button("Verify token") {
+                            persistTokenIfNeeded()
                             tokenChecking = true
                             Task {
                                 let (ok, err) = await runtimeData.testGithubToken()
                                 tokenChecking = false
                                 showTokenAlert = true
                                 tokenAlertTitle = ok ? "Token verified" : "Token verification failed"
-                                tokenAlertContent = err
+                                tokenAlertContent = ok
+                                    ? "This token can access GitHub notifications."
+                                    : err
 
                                 if ok {
                                     AppLog.info("Token verification succeeded")
@@ -212,7 +241,7 @@ private struct TokenSettingsView: View {
                                 }
                             }
                         }
-                        .disabled(tokenChecking)
+                        .disabled(tokenChecking || tokenDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
 
                         if tokenChecking {
                             ProgressView()
@@ -225,7 +254,7 @@ private struct TokenSettingsView: View {
                 } header: {
                     Text("Access Token")
                 } footer: {
-                    Text("Only the Notifications permission is required.")
+                    Text("Only the Notifications permission is required. The token is saved when you leave this page or verify it.")
                 }
 
                 Section("Help") {
@@ -237,6 +266,19 @@ private struct TokenSettingsView: View {
             .padding(20)
         }
         .navigationTitle("GitHub")
+        .onAppear {
+            tokenDraft = runtimeData.githubToken
+        }
+        .onDisappear {
+            persistTokenIfNeeded()
+        }
+    }
+
+    private func persistTokenIfNeeded() {
+        let trimmed = tokenDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed != runtimeData.githubToken {
+            runtimeData.githubToken = trimmed
+        }
     }
 }
 
@@ -308,19 +350,11 @@ private struct SettingsAppIconView: View {
     let cornerRadius: CGFloat
 
     var body: some View {
-        let nsImage = appIconImage
-        let image = Image(nsImage: nsImage)
+        Image(nsImage: appIconImage)
             .resizable()
             .scaledToFit()
             .frame(width: size, height: size)
-
-        if #available(macOS 14.0, *) {
-            image
-                .clipShape(.rect(cornerRadius: cornerRadius))
-        } else {
-            image
-                .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-        }
+            .clipShape(.rect(cornerRadius: cornerRadius))
     }
 
     private var appIconImage: NSImage {
@@ -336,5 +370,5 @@ private struct SettingsAppIconView: View {
 
 #Preview {
     SettingView()
-        .environmentObject(RuntimeData())
+        .environment(RuntimeData())
 }

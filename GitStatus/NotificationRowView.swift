@@ -1,6 +1,16 @@
 import AppKit
 import SwiftUI
 
+func sizedGitHubAvatarURL(_ url: URL, pixelSize: Int = 40) -> URL {
+    var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+    var items = components?.queryItems ?? []
+    if !items.contains(where: { $0.name == "s" }) {
+        items.append(URLQueryItem(name: "s", value: String(pixelSize)))
+        components?.queryItems = items
+    }
+    return components?.url ?? url
+}
+
 struct NotificationRowView: View {
     let thread: GitHubNotificationThread
     let details: GitHubSubjectDetails?
@@ -111,20 +121,15 @@ struct AvatarStackView: View {
 
 private struct AvatarImageView: View {
     let url: URL
-    @StateObject private var loader: AvatarImageLoader
-
-    init(url: URL) {
-        self.url = url
-        _loader = StateObject(wrappedValue: AvatarImageLoader(url: url))
-    }
 
     var body: some View {
-        ZStack {
-            if let image = loader.image {
-                Image(nsImage: image)
+        AsyncImage(url: sizedGitHubAvatarURL(url)) { phase in
+            switch phase {
+            case .success(let image):
+                image
                     .resizable()
                     .scaledToFill()
-            } else {
+            default:
                 Circle()
                     .fill(Color.secondary.opacity(0.2))
             }
@@ -135,9 +140,6 @@ private struct AvatarImageView: View {
             Circle()
                 .stroke(Color(NSColor.separatorColor).opacity(0.8), lineWidth: 1)
         )
-        .task {
-            await loader.load()
-        }
     }
 }
 
@@ -216,62 +218,5 @@ private struct HoverTrackingView: NSViewRepresentable {
             let mouseInView = convert(mouseInWindow, from: nil)
             onHoverChanged?(bounds.contains(mouseInView))
         }
-    }
-}
-
-@MainActor
-private final class AvatarImageLoader: ObservableObject {
-    @Published var image: NSImage?
-    private let url: URL
-    private var task: Task<Data?, Never>?
-
-    private static let cache: NSCache<NSURL, NSImage> = {
-        let c = NSCache<NSURL, NSImage>()
-        c.countLimit = 128
-        return c
-    }()
-
-    private static let session: URLSession = {
-        let config = URLSessionConfiguration.ephemeral
-        config.requestCachePolicy = .reloadIgnoringLocalCacheData
-        config.urlCache = nil
-        config.timeoutIntervalForRequest = 10
-        config.timeoutIntervalForResource = 10
-        return URLSession(configuration: config)
-    }()
-
-    init(url: URL) {
-        self.url = url
-    }
-
-    deinit {
-        task?.cancel()
-    }
-
-    func load() async {
-        if image != nil { return }
-        if let cached = Self.cache.object(forKey: url as NSURL) {
-            image = cached
-            return
-        }
-
-        if task != nil { return }
-        let url = self.url
-        task = Task.detached(priority: .utility) {
-            do {
-                let (data, response) = try await Self.session.data(from: url)
-                guard !Task.isCancelled else { return nil }
-                guard (response as? HTTPURLResponse).map({ (200...299).contains($0.statusCode) }) ?? false else { return nil }
-                return data
-            } catch {
-                return nil
-            }
-        }
-
-        let data = await task?.value
-        task = nil
-        guard let data, let img = NSImage(data: data) else { return }
-        Self.cache.setObject(img, forKey: url as NSURL)
-        image = img
     }
 }

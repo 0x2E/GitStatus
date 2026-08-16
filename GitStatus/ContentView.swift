@@ -9,11 +9,11 @@ import AppKit
 import SwiftUI
 
 struct ContentView: View {
-    @EnvironmentObject var runtimeData: RuntimeData
+    @Environment(RuntimeData.self) private var runtimeData
     @Environment(\.openURL) private var openURL
     @Environment(\.openWindow) private var openWindow
     @Environment(\.dismiss) private var dismiss
-     
+
     var body: some View {
         ZStack(alignment: .topLeading) {
             VisualEffectView(material: .menu, blendingMode: .withinWindow)
@@ -52,7 +52,7 @@ struct ContentView: View {
             Spacer(minLength: 8)
 
             Button {
-                runtimeData.renewPullTask(interval: runtimeData.interval)
+                runtimeData.renewPullTask(interval: runtimeData.interval, force: true)
             } label: {
                 Image(systemName: "arrow.clockwise")
                     .symbolRenderingMode(.hierarchical)
@@ -64,7 +64,7 @@ struct ContentView: View {
             .help("Refresh")
 
             Button {
-                openURL(URL(string: "https://github.com/notifications")!)
+                openURL(GitHubEndpoint.notificationsWeb)
             } label: {
                 Image(systemName: "safari")
                     .symbolRenderingMode(.hierarchical)
@@ -107,31 +107,42 @@ struct ContentView: View {
         if !runtimeData.message.isEmpty {
             return "Error"
         }
+
+        let countText: String
         if runtimeData.notifications.isEmpty {
-            return "All caught up"
+            countText = "All caught up"
+        } else if runtimeData.hasMoreNotifications {
+            countText = "Loaded \(runtimeData.notifications.count)+"
+        } else {
+            countText = "Loaded \(runtimeData.notifications.count)"
         }
-        if runtimeData.hasMoreNotifications {
-            return "Loaded \(runtimeData.notifications.count)+"
+
+        if let lastPull = runtimeData.lastPull {
+            return "\(countText) · Updated \(lastPull.formatted(.relative(presentation: .named)))"
         }
-        return "Loaded \(runtimeData.notifications.count)"
+        return countText
+    }
+
+    private var errorStatus: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: "exclamationmark.triangle")
+                    .foregroundStyle(.secondary)
+                Text(runtimeData.message)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Button("Retry") {
+                runtimeData.renewPullTask(interval: runtimeData.interval, force: true)
+            }
+            .buttonStyle(.link)
+        }
     }
 
     @ViewBuilder
     private var content: some View {
-        if !runtimeData.message.isEmpty {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(alignment: .top, spacing: 10) {
-                    Image(systemName: "exclamationmark.triangle")
-                        .foregroundStyle(.secondary)
-                    Text(runtimeData.message)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
-                Button("Retry") {
-                    runtimeData.renewPullTask(interval: runtimeData.interval)
-                }
-                .buttonStyle(.link)
-            }
+        if !runtimeData.message.isEmpty && runtimeData.notifications.isEmpty {
+            errorStatus
         } else if runtimeData.notifications.isEmpty {
             VStack(alignment: .leading, spacing: 8) {
                 Text("All caught up")
@@ -143,58 +154,65 @@ struct ContentView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         } else {
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 2) {
-                    ForEach(runtimeData.notifications) { thread in
-                        NotificationRowView(
-                            thread: thread,
-                            details: runtimeData.subjectDetailsByThreadId[thread.id],
-                            onOpen: { thread, url in
-                                closeMenuWindowIfPossible()
-                                openURL(runtimeData.urlForOpeningNotificationDetail(threadId: thread.id, baseURL: url))
-                            }
-                        )
-                    }
-
-                    if runtimeData.isLoadingMoreNotifications {
-                        HStack(spacing: 10) {
-                            Spacer()
-                            ProgressView()
-                                .controlSize(.small)
-                            Text("Loading…")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            Spacer()
-                        }
-                        .padding(.vertical, 8)
-                    } else if runtimeData.hasMoreNotifications {
-                        HStack {
-                            Spacer()
-                            Button("Load more") {
-                                runtimeData.loadMoreNotifications()
-                            }
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
-                            Spacer()
-                        }
-                        .padding(.vertical, 8)
-                    }
-
-                    if !runtimeData.loadMoreError.isEmpty {
-                        HStack {
-                            Spacer()
-                            Text(runtimeData.loadMoreError)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(2)
-                            Spacer()
-                        }
-                        .padding(.bottom, 6)
-                    }
+            VStack(alignment: .leading, spacing: 8) {
+                if !runtimeData.message.isEmpty {
+                    errorStatus
                 }
-                .padding(.vertical, 2)
+
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 2) {
+                        ForEach(runtimeData.notifications) { thread in
+                            NotificationRowView(
+                                thread: thread,
+                                details: runtimeData.subjectDetailsByThreadId[thread.id],
+                                onOpen: { thread, url in
+                                    closeMenuWindowIfPossible()
+                                    openURL(runtimeData.urlForOpeningNotificationDetail(threadId: thread.id, baseURL: url))
+                                    runtimeData.handleNotificationOpened(thread)
+                                }
+                            )
+                        }
+
+                        if runtimeData.isLoadingMoreNotifications {
+                            HStack(spacing: 10) {
+                                Spacer()
+                                ProgressView()
+                                    .controlSize(.small)
+                                Text("Loading…")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                Spacer()
+                            }
+                            .padding(.vertical, 8)
+                        } else if runtimeData.hasMoreNotifications {
+                            HStack {
+                                Spacer()
+                                Button("Load more") {
+                                    runtimeData.loadMoreNotifications()
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+                                Spacer()
+                            }
+                            .padding(.vertical, 8)
+                        }
+
+                        if !runtimeData.loadMoreError.isEmpty {
+                            HStack {
+                                Spacer()
+                                Text(runtimeData.loadMoreError)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(2)
+                                Spacer()
+                            }
+                            .padding(.bottom, 6)
+                        }
+                    }
+                    .padding(.vertical, 2)
+                }
+                .frame(minHeight: 220, idealHeight: 360, maxHeight: 420)
             }
-            .frame(minHeight: 220, idealHeight: 360, maxHeight: 420)
         }
     }
 
@@ -208,5 +226,5 @@ struct ContentView: View {
 
 #Preview {
     ContentView()
-        .environmentObject(RuntimeData())
+        .environment(RuntimeData())
 }
