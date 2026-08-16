@@ -92,7 +92,7 @@ struct ContentView: View {
                 runtimeData.renewPullTask(interval: runtimeData.interval, force: true)
             }
 
-            headerButton(systemName: "arrow.up.right.square", help: "Open in GitHub") {
+            headerButton(systemName: "arrow.up.right", help: "Open in GitHub") {
                 closeMenuWindowIfPossible()
                 openURL(GitHubEndpoint.notificationsWeb)
             }
@@ -242,7 +242,9 @@ struct ContentView: View {
         Button(action: action) {
             Image(systemName: systemName)
                 .symbolRenderingMode(.hierarchical)
-                .font(.system(size: 14))
+                .resizable()
+                .scaledToFit()
+                .frame(width: 15, height: 15)
                 .frame(width: 28, height: 28)
                 .contentShape(Rectangle())
         }
