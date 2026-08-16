@@ -75,10 +75,17 @@ final class GitStatusLogicTests: XCTestCase {
     }
 
     func testPollTimingBackoffDoesNotStopRetrying() {
-        XCTAssertEqual(PollTiming.retryDelay(failCount: 1, serverPollInterval: nil), 30)
-        XCTAssertEqual(PollTiming.retryDelay(failCount: 2, serverPollInterval: nil), 60)
+        XCTAssertEqual(PollTiming.retryDelay(failCount: 1, serverPollInterval: nil), 60)
+        XCTAssertEqual(PollTiming.retryDelay(failCount: 2, serverPollInterval: nil), 120)
         XCTAssertEqual(PollTiming.retryDelay(failCount: 3, serverPollInterval: nil), 300)
         XCTAssertEqual(PollTiming.retryDelay(failCount: 8, serverPollInterval: 90), 300)
+    }
+
+    func testLocalDismissalFiltersPendingAndPrunesGoneIDs() {
+        var dismissed: Set = ["gone", "pending"]
+        let visible = LocalDismissal.visibleIDs(from: ["pending", "other"], dismissed: &dismissed)
+        XCTAssertEqual(visible, ["other"])
+        XCTAssertEqual(dismissed, ["pending"])
     }
 
     func testSizedAvatarURLAddsPixelSizeOnce() {

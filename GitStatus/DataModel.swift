@@ -121,20 +121,27 @@ enum PollTiming {
         let backoff: Int
         switch failCount {
         case ...1:
-            backoff = 30
+            backoff = minimumInterval
         case 2:
-            backoff = 60
+            backoff = 120
         default:
             backoff = 300
         }
-        return max(backoff, serverPollInterval ?? 0)
+        return max(backoff, serverPollInterval ?? 0, minimumInterval)
+    }
+}
+
+enum LocalDismissal {
+    static func visibleIDs(from serverIDs: [String], dismissed: inout Set<String>) -> [String] {
+        dismissed.formIntersection(Set(serverIDs))
+        return serverIDs.filter { !dismissed.contains($0) }
     }
 }
 
 enum NotificationPullResult {
     case notModified(pollInterval: Int?)
     case updated(threads: [GitHubNotificationThread], hasNext: Bool, etag: String?, pollInterval: Int?)
-    case failed(String)
+    case failed(String, stopRetrying: Bool = false)
 }
 
 func pullNotificationThreads(
@@ -162,7 +169,13 @@ func pullNotificationThreads(
             let preview = body.prefix(512)
             AppLog.warning("GitHub API HTTP \(statusCode), body: \(preview)")
         }
-        return .failed(e.userMessage)
+        let stopRetrying: Bool
+        if case .httpError(let statusCode, _) = e, statusCode == 401 {
+            stopRetrying = true
+        } else {
+            stopRetrying = false
+        }
+        return .failed(e.userMessage, stopRetrying: stopRetrying)
     } catch {
         AppLog.warning("GitHub API request failed (network/firewall?)")
         return .failed("cannot request, please check network or firewall")
@@ -413,6 +426,8 @@ final class RuntimeData {
             viewerFetchTask = nil
             viewerUserId = nil
             notificationsETag = nil
+            serverPollInterval = nil
+            locallyDismissedThreadIds = []
             renewPullTask(interval: interval)
         }
     }
@@ -424,6 +439,7 @@ final class RuntimeData {
     @ObservationIgnored private var nextNotificationsPage: Int?
     @ObservationIgnored private var notificationsETag: String?
     @ObservationIgnored private var serverPollInterval: Int?
+    @ObservationIgnored private var locallyDismissedThreadIds: Set<String> = []
 
     init() {
         let defaults = UserDefaults.standard
@@ -517,8 +533,6 @@ final class RuntimeData {
                     }
                     self.message = ""
                     self.lastPull = Date()
-                    self.isLoadingMoreNotifications = false
-                    self.loadMoreError = ""
 
                 case .updated(let firstPage, let hasNext, let etag, let pollInterval):
                     failsCount = 0
@@ -528,24 +542,18 @@ final class RuntimeData {
                     if let etag {
                         self.notificationsETag = etag
                     }
-                    self.notifications = firstPage
+                    self.applyFetchedPage(firstPage, hasNext: hasNext)
                     self.message = ""
                     self.lastPull = Date()
-                    self.nextNotificationsPage = hasNext ? 2 : nil
-                    self.hasMoreNotifications = self.nextNotificationsPage != nil
-                    self.isLoadingMoreNotifications = false
-                    self.loadMoreError = ""
 
-                    let ids = Set(firstPage.map(\.id))
-                    self.subjectDetailsByThreadId = self.subjectDetailsByThreadId.filter { ids.contains($0.key) }
-
-                case .failed(let err):
+                case .failed(let err, let stopRetrying):
                     failsCount += 1
                     AppLog.warning("Pull notifications failed: \(err)")
                     self.message = err
-                    self.lastPull = Date()
-                    self.isLoadingMoreNotifications = false
-                    self.loadMoreError = ""
+                    if stopRetrying {
+                        AppLog.warning("Stopping pull task (non-retryable error)")
+                        return
+                    }
                 }
 
                 if Task.isCancelled { return }
@@ -608,6 +616,7 @@ final class RuntimeData {
                 var merged = self.notifications
                 for t in threads {
                     guard !seen.contains(t.id) else { continue }
+                    guard !self.locallyDismissedThreadIds.contains(t.id) else { continue }
                     seen.insert(t.id)
                     merged.append(t)
                 }
@@ -618,7 +627,7 @@ final class RuntimeData {
                 let ids = Set(merged.map(\.id))
                 self.subjectDetailsByThreadId = self.subjectDetailsByThreadId.filter { ids.contains($0.key) }
 
-            case .failed(let err):
+            case .failed(let err, _):
                 self.loadMoreError = err
             }
         }
@@ -676,6 +685,7 @@ final class RuntimeData {
     }
 
     func handleNotificationOpened(_ thread: GitHubNotificationThread) {
+        locallyDismissedThreadIds.insert(thread.id)
         notifications.removeAll { $0.id == thread.id }
         subjectDetailsByThreadId[thread.id] = nil
 
@@ -688,11 +698,32 @@ final class RuntimeData {
             } catch {
                 AppLog.warning("Mark thread \(threadId) as read failed")
                 guard let self else { return }
-                if !self.notifications.contains(where: { $0.id == threadId }) {
-                    self.notifications.insert(thread, at: 0)
-                }
+                self.locallyDismissedThreadIds.remove(threadId)
+                self.insertNotificationPreservingOrder(thread)
             }
         }
+    }
+
+    private func applyFetchedPage(_ firstPage: [GitHubNotificationThread], hasNext: Bool) {
+        let visibleIDs = LocalDismissal.visibleIDs(
+            from: firstPage.map(\.id),
+            dismissed: &locallyDismissedThreadIds
+        )
+        let visible = Set(visibleIDs)
+        notifications = firstPage.filter { visible.contains($0.id) }
+        nextNotificationsPage = hasNext ? 2 : nil
+        hasMoreNotifications = nextNotificationsPage != nil
+        isLoadingMoreNotifications = false
+        loadMoreError = ""
+
+        let ids = Set(notifications.map(\.id))
+        subjectDetailsByThreadId = subjectDetailsByThreadId.filter { ids.contains($0.key) }
+    }
+
+    private func insertNotificationPreservingOrder(_ thread: GitHubNotificationThread) {
+        guard !notifications.contains(where: { $0.id == thread.id }) else { return }
+        let index = notifications.firstIndex { $0.updatedAt < thread.updatedAt } ?? notifications.endIndex
+        notifications.insert(thread, at: index)
     }
 
     func urlForOpeningNotificationDetail(threadId: String, baseURL: URL) -> URL {
@@ -723,12 +754,12 @@ final class RuntimeData {
         }
     }
 
-    func testGithubToken() async -> (Bool, String) {
-        let token = githubToken
+    func testGithubToken(_ token: String? = nil) async -> (Bool, String) {
+        let token = token ?? githubToken
         switch await pullNotificationThreads(githubToken: token, page: 1, perPage: 1) {
         case .notModified, .updated:
             return (true, "")
-        case .failed(let err):
+        case .failed(let err, _):
             return (false, err)
         }
     }

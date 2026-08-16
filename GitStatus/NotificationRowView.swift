@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 
-func sizedGitHubAvatarURL(_ url: URL, pixelSize: Int = 40) -> URL {
+func sizedGitHubAvatarURL(_ url: URL, pixelSize: Int = 64) -> URL {
     var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
     var items = components?.queryItems ?? []
     if !items.contains(where: { $0.name == "s" }) {

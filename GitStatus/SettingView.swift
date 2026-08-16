@@ -223,10 +223,10 @@ private struct TokenSettingsView: View {
 
                     HStack(spacing: 10) {
                         Button("Verify token") {
-                            persistTokenIfNeeded()
+                            let draft = tokenDraft.trimmingCharacters(in: .whitespacesAndNewlines)
                             tokenChecking = true
                             Task {
-                                let (ok, err) = await runtimeData.testGithubToken()
+                                let (ok, err) = await runtimeData.testGithubToken(draft)
                                 tokenChecking = false
                                 showTokenAlert = true
                                 tokenAlertTitle = ok ? "Token verified" : "Token verification failed"
@@ -235,6 +235,7 @@ private struct TokenSettingsView: View {
                                     : err
 
                                 if ok {
+                                    persistTokenIfNeeded()
                                     AppLog.info("Token verification succeeded")
                                 } else {
                                     AppLog.warning("Token verification failed: \(err)")
@@ -254,7 +255,7 @@ private struct TokenSettingsView: View {
                 } header: {
                     Text("Access Token")
                 } footer: {
-                    Text("Only the Notifications permission is required. The token is saved when you leave this page or verify it.")
+                    Text("Only the Notifications permission is required. The token is saved when you leave this page, or when verification succeeds.")
                 }
 
                 Section("Help") {
