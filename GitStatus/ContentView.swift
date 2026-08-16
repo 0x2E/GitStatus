@@ -242,8 +242,8 @@ struct ContentView: View {
         Button(action: action) {
             Image(systemName: systemName)
                 .symbolRenderingMode(.hierarchical)
-                .font(.system(size: 13))
-                .frame(width: 22, height: 22)
+                .font(.system(size: 14))
+                .frame(width: 28, height: 28)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.borderless)
