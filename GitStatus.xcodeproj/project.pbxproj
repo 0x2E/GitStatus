@@ -82,14 +82,6 @@
 			name = Products;
 			sourceTree = "<group>";
 		};
-		54B100032D20000100000003 /* GitStatusTests */ = {
-			isa = PBXGroup;
-			children = (
-				54B100002D20000100000001 /* GitStatusLogicTests.swift */,
-			);
-			path = GitStatusTests;
-			sourceTree = "<group>";
-		};
 		542612632ACFB17E00682CA7 /* GitStatus */ = {
 			isa = PBXGroup;
 			children = (
@@ -114,6 +106,14 @@
 				5426126B2ACFB17F00682CA7 /* Preview Assets.xcassets */,
 			);
 			path = "Preview Content";
+			sourceTree = "<group>";
+		};
+		54B100032D20000100000003 /* GitStatusTests */ = {
+			isa = PBXGroup;
+			children = (
+				54B100002D20000100000001 /* GitStatusLogicTests.swift */,
+			);
+			path = GitStatusTests;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -377,6 +377,7 @@
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_OUTGOING_NETWORK_CONNECTIONS = YES;
 				ENABLE_PREVIEWS = YES;
+				ENABLE_TESTABILITY = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = GitStatus/Info.plist;
@@ -388,12 +389,11 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.6;
-				MARKETING_VERSION = 2.0.1;
+				MARKETING_VERSION = 2.1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.rook1e.GitStatus;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 6.0;
-				ENABLE_TESTABILITY = YES;
 			};
 			name = Debug;
 		};
@@ -424,7 +424,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.6;
-				MARKETING_VERSION = 2.0.1;
+				MARKETING_VERSION = 2.1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.rook1e.GitStatus;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
