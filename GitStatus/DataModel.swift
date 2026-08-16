@@ -32,15 +32,11 @@ struct GitHubNotificationThread: Identifiable, Codable {
         let title: String
         let type: String
         let url: URL?
-        let latestCommentUrl: URL?
     }
 
-    let reason: String
     let unread: Bool
     let updatedAt: Date
-    let lastReadAt: Date?
     let url: URL
-    let subscriptionUrl: URL?
 }
 
 extension GitHubNotificationThread.Subject {
@@ -98,6 +94,9 @@ enum GitHubEndpoint {
     static let notifications = URL(string: "https://api.github.com/notifications")!
     static let user = URL(string: "https://api.github.com/user")!
     static let notificationsWeb = URL(string: "https://github.com/notifications")!
+    static let tokenSettings = URL(string: "https://github.com/settings/tokens")!
+    static let projectRepository = URL(string: "https://github.com/0x2E/GitStatus")!
+    static let projectIssues = URL(string: "https://github.com/0x2E/GitStatus/issues")!
 }
 
 enum GitHubLinkHeader {
@@ -257,9 +256,7 @@ struct GitHubAPIClient {
 
     private func perform(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
         let started = Date()
-#if DEBUG
         AppLog.debug("HTTP \(request.httpMethod ?? "GET") \(request.url?.absoluteString ?? "")")
-#endif
         let (data, response) = try await Self.session.data(for: request)
         guard let http = response as? HTTPURLResponse else {
             AppLog.warning("HTTP invalid response for \(request.url?.absoluteString ?? "")")
@@ -306,12 +303,10 @@ struct GitHubAPIClient {
     }
 
     func fetchNotifications(page: Int, perPage: Int, etag: String? = nil) async throws -> NotificationsFetch {
-        var components = URLComponents(url: GitHubEndpoint.notifications, resolvingAgainstBaseURL: false)!
-        components.queryItems = [
+        let url = GitHubEndpoint.notifications.appending(queryItems: [
             URLQueryItem(name: "page", value: String(max(page, 1))),
             URLQueryItem(name: "per_page", value: String(min(max(perPage, 1), 50))),
-        ]
-        let url = components.url!
+        ])
 
         var request = makeRequest(url: url)
         if page == 1, let etag, !etag.isEmpty {
@@ -371,9 +366,7 @@ struct GitHubAPIClient {
             for u in res.assignees ?? [] { append(u) }
             return GitHubSubjectDetails(htmlUrl: res.htmlUrl, participants: participants)
         } catch {
-#if DEBUG
             AppLog.debug("Subject details fetch failed: \(subjectURL.absoluteString)")
-#endif
             return nil
         }
     }
@@ -493,12 +486,6 @@ final class RuntimeData {
         pullTask = nil
         detailsTask = nil
         loadMoreTask = nil
-
-        if interval < 1 {
-            self.message = "Interval is too short"
-            AppLog.warning("Interval too short: \(interval)")
-            return
-        }
 
         if githubToken.isEmpty {
             self.message = "Set GitHub token in settings first!"
@@ -647,9 +634,7 @@ final class RuntimeData {
             return
         }
 
-#if DEBUG
         AppLog.debug("Prefetch subject details: \(targets.count) targets")
-#endif
 
         detailsTask = Task { [weak self] in
             guard let self else { return }

@@ -33,11 +33,6 @@ enum AppLog {
         Task { await file.append(level: "WARN", message: message) }
     }
 
-    static func error(_ message: String) {
-        logger.error("\(message, privacy: .public)")
-        Task { await file.append(level: "ERROR", message: message) }
-    }
-
 #if DEBUG
     static func debug(_ message: String) {
         logger.debug("\(message, privacy: .public)")
