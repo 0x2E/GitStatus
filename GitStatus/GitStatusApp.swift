@@ -20,24 +20,24 @@ struct GitStatusApp: App {
     var body: some Scene {
         MenuBarExtra {
             ContentView()
-                .environmentObject(RuntimeData.shared)
+                .environment(RuntimeData.shared)
                 .frame(width: 420, height: 520)
         } label: {
             MenuBarLabelView()
-                .environmentObject(RuntimeData.shared)
+                .environment(RuntimeData.shared)
         }
         .menuBarExtraStyle(.window)
 
-        WindowGroup(id: "settings") {
+        Window("Settings", id: "settings") {
             SettingView()
-                .environmentObject(RuntimeData.shared)
+                .environment(RuntimeData.shared)
         }
         .defaultSize(width: 720, height: 520)
     }
 }
 
 private struct MenuBarLabelView: View {
-    @EnvironmentObject private var runtimeData: RuntimeData
+    @Environment(RuntimeData.self) private var runtimeData
 
     var body: some View {
         let count = runtimeData.notifications.count
